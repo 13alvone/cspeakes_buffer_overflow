@@ -2,6 +2,15 @@
 
 The cspeakes_buffer_overflow.py project was created to assist cyber professionals, white-hat penetration testers,
  and future security researchers in the process of network service exploit development. 
+
+## Requirements:
+* Python3.8+
+
+## Scope:
+Windows x86 Exploit Development Assistance;
+Tested Successfully from x64 Kali VM --> WindowsXP Pro 32 bit; 
+  --> Service: Freefloat FTP 1.0
+  --> Service: SLMail 5.5
  
 ## Background
 
@@ -12,7 +21,7 @@ This situation exists and is seemingly continuously exploitable in legacy and mo
 ## Usage
 
 ```
-python3 cspeakes_buffer_overflow.py -i <IP> -p <PORT> 
+python3 cspeakes_buffer_overflow.py -i <IP> -p <PORT> -li <local_ip> -lp <local_listening_port> -c <max_char_len_to_test> 
 ```
 
 ## Disclaimer
